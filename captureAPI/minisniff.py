@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 #----------------------------------------------------------------------
 # Name:        minisniff.py
@@ -10,10 +10,17 @@
 # Copyright:   (c) Tim 2018
 # Licence:     see the LICENSE.txt file
 #----------------------------------------------------------------------
+#
+# Notes
+# Windows "open" fixed - changed from WinDLL to CDLL
+# Output file opened in raw binary mode
+# various print/sep parameters changed to print/end
+#
+#----------------------------------------------------------------------
 
 from __future__ import print_function
 
-import sys, ctypes, time, os.path
+import sys, ctypes, time, os.path, platform, struct
 
 from ctypes import *
 
@@ -28,89 +35,127 @@ E_BUFFER_ALLOCATION_FAILED    = -5
 ##---------------------------------------------------------
 # note that this DLL/SO uses false=0, true=1
 def main():
+  print("Python {:s} on {:s}\n".format(sys.version, sys.platform))
   sniffer = None
   try:
 
-    dll_name = "libsniff_min.dll"
-    # dllabspath = os.path.dirname(os.path.abspath(__file__))
-    # dllabspath += os.path.sep + dll_name
-    try:
-      mini = ctypes.CDLL(dll_name)    # or dllabspath
-    except OSError:
+    dll_name = "./libsniff_min"
+    if platform.system() == 'Windows':
+      # print('Windows')
       try:
-        mini = ctypes.CDLL("libsniff_min.so")
-      except OSError:
-        print('libsniff_min.dll or libsniff_min.so is missing - exiting')
+        dll = CDLL(dll_name)
+      except OSError as err:
+        print("OS error: {0}".format(err))
+        print(dll_name + '.dll is missing - exiting')
+        return
+    else:
+      # print('Linux assumed')
+      try:
+        dll = CDLL(dll_name + '.so')
+      except OSError as err:
+        print("OS error: {0}".format(err))
+        print(dll_name + '.so is missing - exiting')
         return
 
+    ## if 64-bit, define the argument and result types
+    if struct.calcsize("P") == 8:
+      dll.setConnect.argtypes            = [c_ulonglong, c_int]
+      dll.setRun.argtypes                = [c_ulonglong, c_int]
+      dll.setStop.argtypes               = [c_ulonglong, c_int]
+      dll.getRun.argtypes                = [c_ulonglong]
+      dll.getStop.argtypes               = [c_ulonglong]
+      dll.getCaptureDone.argtypes        = [c_ulonglong]
+      dll.getDecodeDone.argtypes         = [c_ulonglong]
+      dll.getHardwareChanged.argtypes    = [c_ulonglong]
+      dll.setNeeded.argtypes             = [c_ulonglong, c_uint]
+      dll.getCaptureCount.argtypes       = [c_ulonglong]
+      dll.startDecode.argtypes           = [c_ulonglong]
+      dll.getDecodedCount.argtypes       = [c_ulonglong]
+      dll.getHardwareStatus.argtypes     = [c_ulonglong]
+      dll.getSerial.argtypes             = [c_ulonglong, c_char_p, c_uint]
+      dll.getSerialX.argtypes            = [c_ulonglong]
+      dll.getSerialX.restype             = c_char_p
+      dll.getPacketDataRowCount.argtypes = [c_ulonglong]
+      dll.getPacketDataRow.argtypes      = [c_ulonglong, c_uint, c_char_p, c_uint]
+      dll.getPacketDataRowX.argtypes     = [c_ulonglong, c_uint]
+      dll.getPacketDataRowX.restype      = c_char_p
+      dll.getBoxStrX.argtypes            = [c_ulonglong, c_uint]
+      dll.getBoxStrX.restype             = c_char_p
+      dll.linix2rowptr.argtypes          = [c_ulonglong, c_uint]
+      dll.linix2rowptr.restype           = c_char_p
+      dll.sampleFileRead.argtypes        = [c_ulonglong, c_char_p]
+      dll.sniffInit.restype              = c_ulonglong
+      dll.sniffEnd.argtypes              = [c_ulonglong]
+      
+      
     buff = create_string_buffer(256)
-    rv = mini.version(buff, sizeof(buff))
+    rv = dll.version(buff, sizeof(buff))
     print('Using library version: %s\n' % repr(buff.value))
 
     # beeps from your computer as drivers are loaded :)
-    sniffer = c_int(mini.sniffInit())
-    
+    sniffer = dll.sniffInit()
+    print(hex(sniffer))
+
     # loop while waiting for the OS to do its thing
-    snifferStatus = E_SNIFFER_NOT_FOUND 
+    snifferStatus = E_SNIFFER_NOT_FOUND
     for i in range(0, 6):
-      stat = c_int(mini.getHardwareStatus(sniffer))
-      snifferStatus = stat.value
+      snifferStatus = dll.getHardwareStatus(sniffer)
       if snifferStatus != E_SNIFFER_NOT_FOUND:
         break
-      time.sleep(1)    
+      time.sleep(1)
 
     if snifferStatus != INIT_OK:        # probably timed out
       print('problem !!!!')
-      mini.sniffEnd(sniffer)
+      dll.sniffEnd(sniffer)
       return
 
     # here when the sniffer is found OK
     # disconnect
-    mini.setConnect(sniffer, 0)
+    dll.setConnect(sniffer, 0)
     needed = 16 * 1024                  # easily covers setup
-    mini.setNeeded(sniffer, needed)  
+    dll.setNeeded(sniffer, needed)
     # reconnect and run
-    mini.setRun(sniffer, 1)
+    dll.setRun(sniffer, 1)
 
     # loop until finished
     # capture first
     while True:
-      cc    = mini.getCaptureCount(sniffer)
-      cdone = mini.getCaptureDone(sniffer)
+      cc    = dll.getCaptureCount(sniffer)
+      cdone = dll.getCaptureDone(sniffer)
       print(cc, ' ', sep='')
       if cdone:
         break
-      time.sleep(1)    
+      time.sleep(1)
 
     # then decode
     print(' ---> ')
-    mini.startDecode(sniffer);
+    dll.startDecode(sniffer);
     while True:
-      dc    = mini.getDecodedCount(sniffer)
-      ddone = mini.getDecodeDone(sniffer)
+      dc    = dll.getDecodedCount(sniffer)
+      ddone = dll.getDecodeDone(sniffer)
       print(dc, ' ', sep='')
       if ddone:
         break
-      time.sleep(1)    
+      time.sleep(1)
 
     # get packet data plus decoded transactions, etc.
-    lineCount = mini.getPacketDataRowCount(sniffer) 
+    lineCount = dll.getPacketDataRowCount(sniffer)
     print(lineCount, 'decoded rows')
 
-    ofile = open('pyoutput.txt', 'w')
+    ofile = open('pyoutput.txt', 'wb')
     # a huge buffer..
-    rowBuf = create_string_buffer(10 * 1024)    
+    rowBuf = create_string_buffer(10 * 1024)
 
     for i in range(0, lineCount):
-      mini.getPacketDataRow(sniffer, i, rowBuf, sizeof(rowBuf))
+      dll.getPacketDataRow(sniffer, i, rowBuf, sizeof(rowBuf))
       # decoded rows are terminated with \n\0
       # now you can split the data, analyze it any way you want...
       # this program just writes out a file
       ofile.write(rowBuf.value)
 
-    ofile.close()      
+    ofile.close()
 
-    mini.sniffEnd(sniffer)
+    dll.sniffEnd(sniffer)
 
   except:
     e = sys.exc_info()[0]
@@ -122,68 +167,4 @@ if __name__ == '__main__':
   main()
   print('\n==================== bye ==========================')
 
-##---------------------------------------------------------
-# in C++ this becomes:
-#
-#int mainx(sniffHandle sniffer) {
-#  int stat = E_SNIFFER_NOT_FOUND;
-#
-#  for (unsigned ix = 0; ix < 10; ix++) {
-#    std::this_thread::sleep_for(std::chrono::seconds(1));
-#    stat = getHardwareStatus(sniffer);
-#    if (stat != E_SNIFFER_NOT_FOUND)
-#      break;
-#    }
-#
-#  if (stat != INIT_OK)
-#    return EXIT_FAILURE;
-#
-#  setConnect(sniffer, false);
-#  setNeeded(sniffer, 16 * 1024);
-#  setRun(sniffer, true);
-#
-#  // capture
-#  while (true) {
-#    std::cout << getCaptureCount(sniffer) << ' ';
-#    if (getCaptureDone(sniffer))
-#      break;
-#    std::this_thread::sleep_for(std::chrono::seconds(2));
-#    }
-#
-#  // then decode
-#  std::cout << " ---> ";
-#  startDecode(sniffer);
-#  while (true) {
-#    std::cout << getDecodedCount(sniffer) << ' ';
-#    if (getDecodeDone(sniffer))
-#      break;
-#    std::this_thread::sleep_for(std::chrono::seconds(1));
-#    }
-#
-#  std::ofstream ofile("experiment.txt");
-#  auto lineCount = getPacketDataRowCount(sniffer);
-#  char buf[1024 * 10];
-#  for (unsigned i = 0; i < lineCount; i++) {
-#    getPacketDataRow(sniffer, i, buf, sizeof(buf));
-#    ofile << buf;
-#    }
-#  return EXIT_SUCCESS;
-#  }
-#
-#//--------------------------------------------
-#int main() {
-#  std::cout << "\n";
-#  auto sniffer = sniffInit();
-#
-#  char buff[256];
-#  version(buff, sizeof(buff));
-#  std::cout << "\nUsing " << buff << '\n';
-#
-#  int ret = mainx(sniffer);
-#
-#  sniffEnd(sniffer);
-#  std::cout << "--------\n\n";
-#  return ret;
-#  }
-#
-# EOF -----------------------------------------------------------------
+# EOF -----------------------------------------------------

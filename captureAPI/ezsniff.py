@@ -13,7 +13,7 @@
 
 from __future__ import print_function
 
-import sys, ctypes, time, os.path
+import sys, ctypes, time, os.path, struct
 
 from ctypes import *
 
@@ -28,55 +28,92 @@ E_BUFFER_ALLOCATION_FAILED    = -5
 ##---------------------------------------------------------
 # note that this DLL/SO uses false=0, true=1
 def main():
+  print("Python {:s} on {:s}\n".format(sys.version, sys.platform))
   sniffer = None
   try:
 
-    dll_name = "libsniff_ez.dll"
-    # dllabspath = os.path.dirname(os.path.abspath(__file__))
-    # dllabspath += os.path.sep + dll_name
-    try:
-      sniff = ctypes.CDLL(dll_name)    # or dllabspath
-    except OSError:
+    dll_name = "./libsniff_ez"
+    if platform.system() == 'Windows':
+      # print('Windows')
       try:
-        sniff = ctypes.CDLL("libsniff_ez.so")
-      except OSError:
-        print('libsniff_ez.dll or libsniff_ez.so is missing - exiting')
+        dll = CDLL(dll_name)
+      except OSError as err:
+        print("OS error: {0}".format(err))
+        print(dll_name + '.dll is missing - exiting')
         return
+    else:
+      # print('Linux assumed')
+      try:
+        dll = CDLL(dll_name + '.so')
+      except OSError as err:
+        print("OS error: {0}".format(err))
+        print(dll_name + '.so is missing - exiting')
+        return
+        
+    ## if 64-bit, define the argument and result types
+    if struct.calcsize("P") == 8:
+      dll.setConnect.argtypes            = [c_ulonglong, c_int]
+      dll.setRun.argtypes                = [c_ulonglong, c_int]
+      dll.setStop.argtypes               = [c_ulonglong, c_int]
+      dll.getRun.argtypes                = [c_ulonglong]
+      dll.getStop.argtypes               = [c_ulonglong]
+      dll.getCaptureDone.argtypes        = [c_ulonglong]
+      dll.getDecodeDone.argtypes         = [c_ulonglong]
+      dll.getHardwareChanged.argtypes    = [c_ulonglong]
+      dll.setNeeded.argtypes             = [c_ulonglong, c_uint]
+      dll.getCaptureCount.argtypes       = [c_ulonglong]
+      dll.startDecode.argtypes           = [c_ulonglong]
+      dll.getDecodedCount.argtypes       = [c_ulonglong]
+      dll.getHardwareStatus.argtypes     = [c_ulonglong]
+      dll.getSerial.argtypes             = [c_ulonglong, c_char_p, c_uint]
+      dll.getSerialX.argtypes            = [c_ulonglong]
+      dll.getSerialX.restype             = c_char_p
+      dll.getPacketDataRowCount.argtypes = [c_ulonglong]
+      dll.getPacketDataRow.argtypes      = [c_ulonglong, c_uint, c_char_p, c_uint]
+      dll.getPacketDataRowX.argtypes     = [c_ulonglong, c_uint]
+      dll.getPacketDataRowX.restype      = c_char_p
+      dll.getBoxStrX.argtypes            = [c_ulonglong, c_uint]
+      dll.getBoxStrX.restype             = c_char_p
+      dll.linix2rowptr.argtypes          = [c_ulonglong, c_uint]
+      dll.linix2rowptr.restype           = c_char_p
+      dll.sampleFileRead.argtypes        = [c_ulonglong, c_char_p]
+      dll.sniffInit.restype              = c_ulonglong
+      dll.sniffEnd.argtypes              = [c_ulonglong]
 
     buff = create_string_buffer(256)
-    rv = sniff.version(buff, sizeof(buff))
+    rv = dll.version(buff, sizeof(buff))
     print('Using library version: %s\n' % repr(buff.value))
 
     # beeps from your computer as drivers are loaded :)
-    sniffer = c_int(sniff.sniffInit())
+    sniffer = dll.sniffInit()
+    print(hex(sniffer))
     
     # loop while waiting for the OS to do its thing
     snifferStatus = E_SNIFFER_NOT_FOUND 
     for i in range(0, 6):
-      stat = c_int(sniff.getHardwareStatus(sniffer))
-      snifferStatus = stat.value
+      snifferStatus = dll.getHardwareStatus(sniffer)
       if snifferStatus != E_SNIFFER_NOT_FOUND:
         break
       time.sleep(1)    
 
     if snifferStatus != INIT_OK:        # probably timed out
       print('problem !!!!')
-      sniff.sniffEnd(sniffer)
+      dll.sniffEnd(sniffer)
       return
 
     # here when the sniffer is found OK
     # disconnect
-    sniff.setConnect(sniffer, 0)
+    dll.setConnect(sniffer, 0)
     needed = 16 * 1024                  # easily covers setup
-    sniff.setNeeded(sniffer, needed)  
+    dll.setNeeded(sniffer, needed)  
     # reconnect and run
-    sniff.setRun(sniffer, 1)
+    dll.setRun(sniffer, 1)
 
     # loop until finished
     # capture first
     while True:
-      cc    = sniff.getCaptureCount(sniffer)
-      cdone = sniff.getCaptureDone(sniffer)
+      cc    = dll.getCaptureCount(sniffer)
+      cdone = dll.getCaptureDone(sniffer)
       print(cc, ' ', sep='')
       if cdone:
         break
@@ -84,25 +121,25 @@ def main():
 
     # then decode
     print(' ---> ')
-    sniff.startDecode(sniffer);
+    dll.startDecode(sniffer);
     while True:
-      dc    = sniff.getDecodedCount(sniffer)
-      ddone = sniff.getDecodeDone(sniffer)
+      dc    = dll.getDecodedCount(sniffer)
+      ddone = dll.getDecodeDone(sniffer)
       print(dc, ' ', sep='')
       if ddone:
         break
       time.sleep(1)    
 
     # get packet data plus decoded transactions, etc.
-    lineCount = sniff.getPacketDataRowCount(sniffer) 
+    lineCount = dll.getPacketDataRowCount(sniffer) 
     print(lineCount, 'decoded rows')
 
-    ofile = open('pyoutput.txt', 'w')
+    ofile = open('pyoutput.txt', 'wb')
     # a huge buffer..
     rowBuf = create_string_buffer(10 * 1024)    
 
     for i in range(0, lineCount):
-      sniff.getPacketDataRow(sniffer, i, rowBuf, sizeof(rowBuf))
+      dll.getPacketDataRow(sniffer, i, rowBuf, sizeof(rowBuf))
       # decoded rows are terminated with \n\0
       # now you can split the data, analyze it any way you want...
       # this program just writes out a file
@@ -110,7 +147,7 @@ def main():
 
     ofile.close()      
 
-    sniff.sniffEnd(sniffer)
+    dll.sniffEnd(sniffer)
 
   except:
     e = sys.exc_info()[0]
