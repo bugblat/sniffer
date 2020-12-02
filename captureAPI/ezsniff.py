@@ -13,7 +13,7 @@
 
 from __future__ import print_function
 
-import sys, ctypes, time, os.path, struct
+import sys, ctypes, time, os.path, platform, struct
 
 from ctypes import *
 
