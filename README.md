@@ -1,2 +1,2 @@
 # sniffer
-support code for miniSniffer
+support code for ezSniffer and miniSniffer
