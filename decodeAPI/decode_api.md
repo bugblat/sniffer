@@ -1,6 +1,8 @@
 # Decode API
 
-Warning: This is an early version of the Decode API.
+~~~{note}
+This is an early version of the Decode API.
+~~~
 
 When the app starts it scans the *scripts* subdirectory,
 looking for scripts/init.lua, which it then loads and calls.
